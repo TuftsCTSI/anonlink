@@ -2,8 +2,6 @@ import functools as _functools
 import typing as _typing
 import warnings as _warnings
 
-import mypy_extensions as _mypy_extensions
-
 
 def _warn_deprecated(
     module_name: str,
