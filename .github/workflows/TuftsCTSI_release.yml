@@ -23,6 +23,12 @@ jobs:
           CIBW_SKIP: "*-musllinux_* *-win32 *i686"
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_MACOS: arm64 x86_64
+          # Bundle the C++ runtime that the extensions import: Python ships
+          # VCRUNTIME140 but not MSVCP140, so without it a Windows machine
+          # lacking the Visual C++ Redistributable fails to load _dice
+          CIBW_BEFORE_BUILD_WINDOWS: pip install delvewheel
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
+            delvewheel repair --add-dll msvcp140.dll -w {dest_dir} {wheel}
           # Each wheel imports with compiled Dice comparison
           CIBW_TEST_COMMAND: >-
             python -c "import anonlink; from anonlink.similarities import dice_coefficient_accelerated"
