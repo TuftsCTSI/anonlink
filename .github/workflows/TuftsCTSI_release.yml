@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   wheels:
     name: Wheels on ${{ matrix.os }}
@@ -38,12 +41,20 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
 
+  # On a version tag, publish a release with the wheels. Published releases are
+  # immutable, so the release is built as a draft and published last.
   release:
     needs: wheels
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -51,16 +62,29 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Attach wheel and SHA-256 to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Attest the wheels' build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.whl
+
+      - name: Check that the tag has no published release
+        run: |
+          if DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null); then
+            if [ "$DRAFT" != true ]; then
+              echo "$TAG is already published, and a published release can't be changed"
+              exit 1
+            fi
+            echo "Deleting the draft left by an earlier run"
+            gh release delete "$TAG" --yes
+          fi
+
+      - name: Create a draft release with the wheels and their SHA-256
         run: |
           (cd dist && sha256sum *.whl > SHA256SUMS)
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/*.whl dist/SHA256SUMS
-          else
-            gh release create "$GITHUB_REF_NAME" dist/*.whl dist/SHA256SUMS \
-              --verify-tag --title "anonlink $GITHUB_REF_NAME (TuftsCTSI)" \
-              --notes "Wheels for CPython 3.14, for TuftsCTSI/pprl. Not published to PyPI."
-          fi
+          gh release create "$TAG" --draft --verify-tag \
+            --title "anonlink $TAG (TuftsCTSI)" \
+            --notes "Wheels for CPython 3.14, for TuftsCTSI/pprl. Not published to PyPI." \
+            dist/*.whl dist/SHA256SUMS
+
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false
